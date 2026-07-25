@@ -649,8 +649,16 @@
       document.getElementById('lineaActivaContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
+    // Una línea con UN = "0" es "solo documento": el retiro/cambio no se hizo
+    // físicamente (solo se envían los papeles), así que no requiere foto del
+    // producto. Ojo: solo el "0" explícito (Easy); Paris trae un='' y SÍ pide foto.
+    function esSoloDocumento(l) {
+      return String(l && l.un != null ? l.un : '').trim() === '0';
+    }
+
     function renderLineaCard() {
       const l = lineaActual;
+      const soloDoc = esSoloDocumento(l);
       const container = document.getElementById('lineaActivaContainer');
       container.innerHTML = `
       <div class="step active">
@@ -662,7 +670,9 @@
           </div>
         </div>
         <div class="field-group photo-upload">
-          <div class="field-label">Foto del producto <span style="color:var(--danger); font-size:10px; margin-left:6px;">* obligatorio</span></div>
+          <div class="field-label">Foto del producto ${soloDoc
+            ? '<span style="color:var(--text2); font-size:10px; margin-left:6px;">· sin retiro físico (UN 0) — foto opcional</span>'
+            : '<span style="color:var(--danger); font-size:10px; margin-left:6px;">* obligatorio</span>'}</div>
           <div class="photo-drop" id="drop-linea" ondragover="onDragOver(event,'linea')" ondragleave="onDragLeave('linea')" ondrop="onDrop(event,'linea')">
             <input type="file" accept="image/*" multiple capture="environment" onchange="onFileInputLinea(event)">
             <div class="photo-drop-icon">📷</div>
@@ -674,7 +684,7 @@
           <div class="field-label">Observación</div>
           <textarea id="obsLinea" placeholder="Opcional..." oninput="lineaActual.observacion = this.value"></textarea>
         </div>
-        <button class="btn btn-primary" onclick="confirmarLinea()" id="btnConfirmarLinea" disabled style="margin-top:4px;">Confirmar esta línea →</button>
+        <button class="btn btn-primary" onclick="confirmarLinea()" id="btnConfirmarLinea" ${soloDoc ? '' : 'disabled'} style="margin-top:4px;">Confirmar esta línea →</button>
         <button class="btn btn-ghost" onclick="cancelarLinea()">← Cancelar</button>
       </div>`;
     }
@@ -703,7 +713,7 @@
         wrap.innerHTML = `<img src="${data}" alt="foto ${idx + 1}"><button class="photo-remove" onclick="removePhotoLinea(${idx})">×</button>`;
         preview.appendChild(wrap);
       });
-      document.getElementById('btnConfirmarLinea').disabled = lineaActual.fotosData.length === 0;
+      document.getElementById('btnConfirmarLinea').disabled = !esSoloDocumento(lineaActual) && lineaActual.fotosData.length === 0;
     }
 
     function removePhotoLinea(idx) {
@@ -719,7 +729,8 @@
     }
 
     function confirmarLinea() {
-      if (!lineaActual || lineaActual.fotosData.length === 0) return;
+      if (!lineaActual) return;
+      if (!esSoloDocumento(lineaActual) && lineaActual.fotosData.length === 0) return;
       lineasListas[lineaActual.id] = {
         id: lineaActual.id, entrega: lineaActual.entrega, sku: lineaActual.sku,
         producto: lineaActual.producto, un: lineaActual.un,
