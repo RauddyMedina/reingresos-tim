@@ -323,6 +323,21 @@
           <option value="">— Selecciona una línea —</option>
         </select>
 
+        <button class="btn btn-ghost" id="btnMostrarAgregarManual" onclick="mostrarFormManual()"
+          style="margin-top:10px;">➕ Agregar entrega que faltó</button>
+        <div id="formAgregarManual" class="hidden" style="margin-top:10px; padding:12px; background:var(--surface2); border:1px solid var(--border); border-radius:8px;">
+          <div class="field-label">N° de entrega</div>
+          <input type="text" id="manualEntregaInput" inputmode="numeric" placeholder="Ej: 2918712345"
+            style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:15px;">
+          <div class="field-label" style="margin-top:8px;">Descripción (opcional)</div>
+          <input type="text" id="manualDescInput" placeholder="Qué producto es"
+            style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:15px;">
+          <div style="display:flex; gap:8px; margin-top:10px;">
+            <button class="btn btn-primary" onclick="agregarLineaManual()" style="flex:1;">Agregar y fotografiar →</button>
+            <button class="btn btn-ghost" onclick="ocultarFormManual()">Cancelar</button>
+          </div>
+        </div>
+
         <div id="step2Progress" style="margin-top:12px; color:var(--accent3); font-size:13px; font-family:'DM Mono',monospace;"></div>
         <div id="step2Warning" class="hidden"
           style="margin-top:12px; padding:12px 14px; background:rgba(255,165,2,0.12); border:1px solid var(--warning); border-left:4px solid var(--warning); border-radius:8px; font-size:13px; color:var(--warning); line-height:1.45;"></div>
@@ -391,6 +406,7 @@
     let lineasListas = {};        // {lineaId: {...linea, observacion, fotos}}
     let lineaActual = null;       // línea abierta en Step 3: {id, entrega, sku, producto, un, fotosData, fotos, observacion}
     let paletFotosData = [];      // fotos del palet (base64 comprimido)
+    let lineasManuales = {};      // {grupo: [linea, ...]} — entregas agregadas a mano (faltaron en el TIM)
     let allEnvios = [];
     let bodegueroNombre = '';
 
@@ -614,7 +630,9 @@
     }
 
     // ─── STEP 2b: SELECCIÓN DE LÍNEA ─────────────────────────────────
-    function buildLineas(grupo) { return reingresoData[grupo] || []; }
+    function buildLineas(grupo) {
+      return (reingresoData[grupo] || []).concat(lineasManuales[grupo] || []);
+    }
 
     function populateLineaSelect() {
       const sel = document.getElementById('lineaSelect');
@@ -625,7 +643,7 @@
         const opt = document.createElement('option');
         opt.value = idx;
         const prod = (l.producto || '').substring(0, 32);
-        opt.textContent = `${l.entrega} · ${prod}${l.un ? ' (' + l.un + ' un.)' : ''}`;
+        opt.textContent = `${l.entrega} · ${prod}${l.un ? ' (' + l.un + ' un.)' : ''}${l.manual ? ' [agregada]' : ''}`;
         sel.appendChild(opt);
       });
     }
@@ -638,6 +656,43 @@
       const linea = lineas[parseInt(idx)];
       if (!linea) return;
       sel.value = '';
+      iniciarLinea(linea);
+    }
+
+    // ─── Entrega que faltó (agregada a mano en el andén) ─────────────
+    function mostrarFormManual() {
+      document.getElementById('formAgregarManual').classList.remove('hidden');
+      document.getElementById('btnMostrarAgregarManual').classList.add('hidden');
+      document.getElementById('manualEntregaInput').focus();
+    }
+
+    function ocultarFormManual() {
+      document.getElementById('formAgregarManual').classList.add('hidden');
+      document.getElementById('btnMostrarAgregarManual').classList.remove('hidden');
+      document.getElementById('manualEntregaInput').value = '';
+      document.getElementById('manualDescInput').value = '';
+    }
+
+    function agregarLineaManual() {
+      const entrega = document.getElementById('manualEntregaInput').value.trim();
+      const desc = document.getElementById('manualDescInput').value.trim();
+      if (!entrega) { showToast('Escribe el N° de entrega', 'error'); return; }
+
+      const id = `${entrega}::MANUAL`;
+      const yaExiste = buildLineas(selectedGrupo).some(l => l.id === id);
+      if (yaExiste) { showToast('Esa entrega ya está en la lista', 'error'); return; }
+
+      const linea = {
+        id, entrega, sku: 'MANUAL',
+        producto: desc || '(agregado en andén)', un: '', manual: true,
+      };
+      if (!lineasManuales[selectedGrupo]) lineasManuales[selectedGrupo] = [];
+      lineasManuales[selectedGrupo].push(linea);
+      guardarBorrador();
+      ocultarFormManual();
+      populateLineaSelect();
+      actualizarBotonesStep2();
+      showToast(`Entrega ${entrega} agregada`, 'success');
       iniciarLinea(linea);
     }
 
@@ -665,7 +720,7 @@
         <div class="step-header">
           <div class="step-num">4</div>
           <div>
-            <div class="step-title">${l.entrega} · ${l.producto || '—'}</div>
+            <div class="step-title">${l.entrega} · ${l.producto || '—'}${l.manual ? ' <span style="color:var(--accent3); font-size:12px;">[agregada]</span>' : ''}</div>
             <div class="step-desc">SKU ${l.sku}${l.un ? ' · ' + l.un + ' un.' : ''}</div>
           </div>
         </div>
@@ -686,6 +741,7 @@
         </div>
         <button class="btn btn-primary" onclick="confirmarLinea()" id="btnConfirmarLinea" ${soloDoc ? '' : 'disabled'} style="margin-top:4px;">Confirmar esta línea →</button>
         <button class="btn btn-ghost" onclick="cancelarLinea()">← Cancelar</button>
+        ${l.manual ? '<button class="btn btn-ghost" onclick="eliminarLineaManualActual()" style="border-color:var(--danger); color:var(--danger);">🗑 Eliminar esta entrega agregada</button>' : ''}
       </div>`;
     }
 
@@ -733,7 +789,7 @@
       if (!esSoloDocumento(lineaActual) && lineaActual.fotosData.length === 0) return;
       lineasListas[lineaActual.id] = {
         id: lineaActual.id, entrega: lineaActual.entrega, sku: lineaActual.sku,
-        producto: lineaActual.producto, un: lineaActual.un,
+        producto: lineaActual.producto, un: lineaActual.un, manual: lineaActual.manual || false,
         observacion: lineaActual.observacion || '', fotos: lineaActual.fotosData
       };
       guardarBorrador();
@@ -820,7 +876,7 @@
         card.innerHTML = `
       <div style="min-width:0; flex:1;">
         <div class="id-number" style="font-size:14px;">${l.entrega}</div>
-        <div style="font-size:12px; color:var(--text2); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${l.producto || ''} · ${l.fotos.length} foto(s)</div>
+        <div style="font-size:12px; color:var(--text2); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${l.producto || ''} · ${l.fotos.length} foto(s)${l.manual ? ' · [agregada]' : ''}</div>
       </div>
       <button onclick="quitarLineaLista('${id}')" title="Quitar"
         style="background:rgba(255,71,87,0.1); border:1px solid rgba(255,71,87,0.35); color:var(--danger); border-radius:8px; padding:8px 10px; font-size:12px; font-weight:600; cursor:pointer; font-family:'DM Sans',sans-serif;">🗑</button>`;
@@ -830,12 +886,33 @@
 
     function quitarLineaLista(id) {
       if (!lineasListas[id]) return;
+      const esManual = !!lineasListas[id].manual;
       if (!confirm(`¿Quitar la línea ${lineasListas[id].entrega} de las confirmadas?`)) return;
       delete lineasListas[id];
+      // Si era una entrega agregada a mano, sacarla también de la lista (si no,
+      // sigue contando en el total y bloquea "Enviar todo" sin poder completarla).
+      if (esManual && lineasManuales[selectedGrupo]) {
+        lineasManuales[selectedGrupo] = lineasManuales[selectedGrupo].filter(l => l.id !== id);
+      }
       guardarBorrador();
       populateLineaSelect();
       actualizarBotonesStep2();
       showToast('Línea quitada', '');
+    }
+
+    // Elimina una entrega agregada a mano ANTES de confirmarla (evita bloquear
+    // el envío si se agregó por error y no se va a fotografiar).
+    function eliminarLineaManualActual() {
+      if (!lineaActual || !lineaActual.manual) return;
+      if (!confirm(`¿Eliminar la entrega ${lineaActual.entrega} agregada?`)) return;
+      if (lineasManuales[selectedGrupo]) {
+        lineasManuales[selectedGrupo] = lineasManuales[selectedGrupo].filter(l => l.id !== lineaActual.id);
+      }
+      guardarBorrador();
+      cancelarLinea();
+      populateLineaSelect();
+      actualizarBotonesStep2();
+      showToast('Entrega eliminada', '');
     }
 
     // ─── BORRADOR PERSISTENTE (IndexedDB) ─────────────────────────
@@ -865,7 +942,10 @@
         await new Promise((resolve, reject) => {
           const tx = db.transaction(DRAFT_STORE, 'readwrite');
           tx.objectStore(DRAFT_STORE).put(
-            { fecha: selectedFecha, cliente: selectedCliente, bodeguero: bodegueroNombre, lineasListas, paletFotosData },
+            {
+              fecha: selectedFecha, cliente: selectedCliente, bodeguero: bodegueroNombre,
+              lineasListas, paletFotosData, lineasManuales: lineasManuales[selectedGrupo] || [],
+            },
             key
           );
           tx.oncomplete = resolve;
@@ -928,6 +1008,13 @@
       const draft = await leerBorrador(selectedCliente, selectedFecha);
       if (!draft) return;
 
+      // Restaurar las líneas manuales ANTES de calcular vigentes: si no, una
+      // entrega agregada a mano (no está en el Sheet) se descartaría del draft
+      // aunque ya tuviera fotos confirmadas.
+      if (draft.lineasManuales && draft.lineasManuales.length) {
+        lineasManuales[selectedGrupo] = draft.lineasManuales;
+      }
+
       const vigentes = new Set(buildLineas(selectedGrupo).map(l => l.id));
       const restauradas = {};
       Object.keys(draft.lineasListas || {}).forEach(id => {
@@ -936,10 +1023,12 @@
       const n = Object.keys(restauradas).length;
       const nFotosPalet = (draft.paletFotosData || []).length;
       if (n === 0 && nFotosPalet === 0) {
+        lineasManuales[selectedGrupo] = [];
         borrarBorrador(selectedCliente, selectedFecha);
         return;
       }
       if (!confirm(`Tienes un avance guardado (${n} línea(s)${nFotosPalet ? ' + fotos de palet' : ''}) para esta hoja TIM.\n\n¿Continuar donde quedaste?`)) {
+        lineasManuales[selectedGrupo] = [];
         borrarBorrador(selectedCliente, selectedFecha);
         return;
       }
@@ -1241,6 +1330,8 @@
 
       selectedCliente = ''; selectedFecha = ''; selectedGrupo = '';
       lineasListas = {}; paletFotosData = []; lineaActual = null;
+      lineasManuales = {}; // limpiar por completo: si no, reprocesar el mismo cliente+fecha
+                            // más tarde resucitaría entregas manuales ya enviadas como pendientes
 
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
