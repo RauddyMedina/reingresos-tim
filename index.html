@@ -355,12 +355,12 @@
 
     <!-- Success Screen -->
     <div class="success-screen" id="successScreen">
-      <div class="success-icon">✅</div>
-      <div class="success-title">¡Reingreso Enviado!</div>
-      <div class="success-sub">Los datos y las fotos fueron registrados en el sistema.</div>
+      <div class="success-icon" id="successIcon">✅</div>
+      <div class="success-title" id="successTitle">¡Reingreso Enviado!</div>
+      <div class="success-sub" id="successSub">Los datos y las fotos fueron registrados en el sistema.</div>
       <div class="receipt" id="receipt"></div>
       <button class="btn btn-success hidden" id="btnReintentarEnvio" onclick="reintentarEnvio()" style="max-width:300px; margin:20px auto 0;">🔄 Reintentar envío</button>
-      <button class="btn btn-ghost" onclick="nuevoLote()" style="max-width:300px; margin:20px auto 0;">+ Nuevo Reingreso</button>
+      <button class="btn btn-ghost" id="btnNuevoLote" onclick="nuevoLote()" style="max-width:300px; margin:20px auto 0;">+ Nuevo Reingreso</button>
     </div>
 
     <div class="admin-link"><a href="#" onclick="toggleAdmin(event)">[ ADMIN ]</a></div>
@@ -1090,8 +1090,12 @@
       } catch (e) { console.warn('reverificarPendientes falló:', e.message); }
     }
 
-    // Tope aproximado de fotos por tanda (caracteres base64 ≈ bytes)
-    const TANDA_MAX_CHARS = 2500000;
+    // Tope aproximado de fotos por tanda (caracteres base64 ≈ bytes).
+    // Estaba en 2.500.000 (~1,8 MB por POST) y desde el celular de bodega una tanda
+    // así tardaba más de lo que el cliente espera para confirmarla: el 07-09-2026 pasó
+    // la tanda 1 (4 líneas) y las siguientes nunca llegaron. Más POSTs chicos suben
+    // mejor por un enlace flojo y, si uno falla, se pierde menos.
+    const TANDA_MAX_CHARS = 800000;
 
     function partirEnTandas(ordenes) {
       const tandas = [];
@@ -1136,11 +1140,11 @@
           enviarViaFormPost(sub);
           await sleep(1200);
 
-          let ok = await verificarEnvio(record.cliente, record.fecha, 6, 2000, ids);
+          let ok = await verificarEnvio(record.cliente, record.fecha, 10, 3000, ids);
           if (!ok) {
             console.warn(`Tanda ${i + 1}/${total} sin verificar, reenviando...`);
             await enviarViaFetchFallback(sub);
-            ok = await verificarEnvio(record.cliente, record.fecha, 4, 2500, ids);
+            ok = await verificarEnvio(record.cliente, record.fecha, 6, 3000, ids);
           }
           if (!ok) {
             const pendientes = tandas.slice(i).reduce((s, t) => s + t.length, 0);
@@ -1168,9 +1172,29 @@
     }
 
     function reintentarEnvio() { if (envioEnCurso) procesarEnvioPendiente(); }
+    // Único punto donde el envío cambia entre "ok" y "fallido", así que acá se pinta
+    // la pantalla entera. Antes solo aparecía el botón Reintentar mientras el resto
+    // seguía diciendo "✅ ¡Reingreso Enviado!" con "+ Nuevo Reingreso" al lado: el
+    // bodeguero se iba, y las fotos que quedaron en el borrador se pierden con el
+    // dispositivo. En estado de fallo la única salida visible es Reintentar.
     function mostrarBtnReintentar(visible) {
       const btn = document.getElementById('btnReintentarEnvio');
       if (btn) btn.classList.toggle('hidden', !visible);
+
+      const ico = document.getElementById('successIcon');
+      const tit = document.getElementById('successTitle');
+      const sub = document.getElementById('successSub');
+      const nuevo = document.getElementById('btnNuevoLote');
+      if (ico) ico.textContent = visible ? '⚠️' : '✅';
+      if (tit) {
+        tit.textContent = visible ? 'ENVÍO INCOMPLETO' : '¡Reingreso Enviado!';
+        tit.style.color = visible ? 'var(--danger)' : '';
+      }
+      if (sub) sub.textContent = visible
+        ? 'NO cierres esta página: quedaron líneas SIN registrar. Aprieta "Reintentar envío". Si igual falla, recarga la página — tu avance con las fotos queda guardado.'
+        : 'Los datos y las fotos fueron registrados en el sistema.';
+      if (sub) sub.style.color = visible ? 'var(--warning)' : '';
+      if (nuevo) nuevo.classList.toggle('hidden', visible);
     }
 
     // Envía datos mediante un formulario oculto + iframe (bypasea CORS completamente)
