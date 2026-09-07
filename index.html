@@ -284,7 +284,7 @@
 
         <div id="grupoInfo" class="hidden"
           style="margin-top:12px; padding:12px; background:var(--surface2); border-radius:8px; border:1px solid var(--border);">
-          <div style="font-size:11px; color:var(--text2); font-family:'DM Mono',monospace; margin-bottom:4px;">LÍNEAS ENCONTRADAS</div>
+          <div style="font-size:11px; color:var(--text2); font-family:'DM Mono',monospace; margin-bottom:4px;">LÍNEAS DE ESTA HOJA TIM</div>
           <div id="grupoCount" style="font-size:22px; font-family:'DM Mono',monospace; color:var(--accent);">—</div>
         </div>
 
@@ -399,7 +399,11 @@
     const GAS_SECRET = window.GAS_CONFIG?.secret || '';
 
     // ─── DATA STORE ───────────────────────────────────────────────
-    let reingresoData = {};       // { "Cliente::YYYY-MM-DD": [{id,entrega,sku,producto,un}, ...] }
+    let reingresoData = {};       // { "Cliente::YYYY-MM-DD": [{id,entrega,sku,producto,un}, ...] } — PENDIENTES
+    // Líneas de la misma hoja TIM que ya están registradas en el sistema. Van aparte de
+    // reingresoData a propósito: así `total`, `done` y "Enviar todo" siguen contando solo
+    // pendientes, y esto se usa nada más que para mostrarlas en verde y cuadrar el conteo.
+    let hechasData = {};          // { "Cliente::YYYY-MM-DD": [{id,entrega,sku,producto,un}, ...] }
     let selectedCliente = '';
     let selectedFecha = '';
     let selectedGrupo = '';       // "Cliente::YYYY-MM-DD"
@@ -461,7 +465,7 @@
 
     async function cargarDatosDesdeSheet() {
       if (!GAS_URL || GAS_URL.startsWith('REEMPLAZAR')) {
-        reingresoData = {};
+        reingresoData = {}; hechasData = {};
         updateLoadStatus('⚠ URL de GAS no configurada. Contacta al administrador.');
         return;
       }
@@ -470,11 +474,12 @@
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const json = await resp.json();
         reingresoData = json.data || json;
+        hechasData = json.hechas || {};
         const total = Object.values(reingresoData).reduce((s, a) => s + a.length, 0);
         const grupos = Object.keys(reingresoData).length;
         updateLoadStatus(`✓ ${total} línea(s) · ${grupos} hoja(s) TIM · Última carga: ${new Date().toLocaleTimeString('es-CL')}`);
       } catch (e) {
-        reingresoData = {};
+        reingresoData = {}; hechasData = {};
         updateLoadStatus('✗ Error al conectar con el sheet: ' + e.message);
         showToast('Error cargando datos del sheet', 'error');
       }
@@ -523,15 +528,23 @@
         .reverse();
       sel.innerHTML = '<option value="">— Selecciona una fecha —</option>';
       fechas.forEach(f => {
-        const count = reingresoData[`${selectedCliente}::${f}`].length;
         const opt = document.createElement('option');
         opt.value = f;
-        opt.textContent = `${f} (${count} línea${count !== 1 ? 's' : ''})`;
+        opt.textContent = `${f} (${etiquetaConteo(`${selectedCliente}::${f}`)})`;
         sel.appendChild(opt);
       });
       if (fechas.length === 0) {
         sel.innerHTML = '<option value="">— Sin hojas TIM pendientes para este cliente —</option>';
       }
+    }
+
+    // "6 pendientes de 10" en vez de "6 líneas": mostrar solo el pendiente hacía parecer
+    // que se habían perdido las ya rebajadas de esa misma hoja TIM.
+    function etiquetaConteo(grupo) {
+      const pend = (reingresoData[grupo] || []).length;
+      const hechas = (hechasData[grupo] || []).length;
+      if (hechas === 0) return `${pend} línea${pend !== 1 ? 's' : ''}`;
+      return `${pend} pendiente${pend !== 1 ? 's' : ''} de ${pend + hechas}`;
     }
 
     function onFechaChange() {
@@ -540,7 +553,7 @@
       const btn = document.getElementById('btnConfirmarGrupo');
       const grupo = `${selectedCliente}::${selectedFecha}`;
       if (selectedFecha && reingresoData[grupo]) {
-        document.getElementById('grupoCount').textContent = `${reingresoData[grupo].length} línea(s)`;
+        document.getElementById('grupoCount').textContent = etiquetaConteo(grupo);
         info.classList.remove('hidden');
         btn.disabled = false;
       } else {
@@ -827,8 +840,11 @@
     function actualizarBotonesStep2() {
       const total = buildLineas(selectedGrupo).length;
       const done = Object.keys(lineasListas).length;
+      const nHechas = (hechasData[selectedGrupo] || []).length;
       const progEl = document.getElementById('step2Progress');
-      if (progEl) progEl.textContent = done > 0 ? `${done}/${total} línea(s) completadas` : '';
+      if (progEl) progEl.textContent = (done > 0 || nHechas > 0)
+        ? `${done}/${total} línea(s) completadas${nHechas ? ` · ${nHechas} ya rebajada(s) antes` : ''}`
+        : '';
 
       const listo = done >= total && total > 0 && paletFotosData.length > 0;
       const btnEnviar = document.getElementById('btnEnviarTodo');
@@ -856,17 +872,22 @@
       renderLineasListas();
     }
 
+    function tituloBloque(texto) {
+      const el = document.createElement('div');
+      el.style.cssText = 'font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:var(--text2); font-family:"DM Mono",monospace; margin-bottom:2px;';
+      el.textContent = texto;
+      return el;
+    }
+
     function renderLineasListas() {
       const container = document.getElementById('lineasListasContainer');
       if (!container) return;
       container.innerHTML = '';
+      renderYaRebajadas(container);
       const ids = Object.keys(lineasListas);
       if (ids.length === 0) return;
 
-      const titulo = document.createElement('div');
-      titulo.style.cssText = 'font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:var(--text2); font-family:"DM Mono",monospace; margin-bottom:2px;';
-      titulo.textContent = 'Líneas confirmadas — toca 🗑 para quitar';
-      container.appendChild(titulo);
+      container.appendChild(tituloBloque('Líneas confirmadas — toca 🗑 para quitar'));
 
       ids.forEach(id => {
         const l = lineasListas[id];
@@ -880,6 +901,27 @@
       </div>
       <button onclick="quitarLineaLista('${id}')" title="Quitar"
         style="background:rgba(255,71,87,0.1); border:1px solid rgba(255,71,87,0.35); color:var(--danger); border-radius:8px; padding:8px 10px; font-size:12px; font-weight:600; cursor:pointer; font-family:'DM Sans',sans-serif;">🗑</button>`;
+        container.appendChild(card);
+      });
+    }
+
+    // Las que ya están registradas en el sistema (esta hoja TIM, sesión anterior): se
+    // muestran en verde y sin acciones. No entran a lineasListas ni al total — esto es
+    // solo para que el bodeguero vea la hoja completa y no crea que faltan líneas.
+    function renderYaRebajadas(container) {
+      const hechas = hechasData[selectedGrupo] || [];
+      if (hechas.length === 0) return;
+      container.appendChild(tituloBloque(`✅ Ya rebajadas (${hechas.length}) — registradas en el sistema`));
+      hechas.forEach(l => {
+        const card = document.createElement('div');
+        card.className = 'id-card rendido';
+        card.style.cssText = 'padding:12px 14px; display:flex; align-items:center; justify-content:space-between; gap:10px; opacity:0.65;';
+        card.innerHTML = `
+      <div style="min-width:0; flex:1;">
+        <div class="id-number" style="font-size:14px; color:var(--accent3);">${l.entrega}</div>
+        <div style="font-size:12px; color:var(--text2); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${l.producto || ''}</div>
+      </div>
+      <span class="id-status status-done">Hecha</span>`;
         container.appendChild(card);
       });
     }
