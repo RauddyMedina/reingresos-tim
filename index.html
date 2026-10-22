@@ -271,8 +271,11 @@
 
         <div class="field-label">Cliente</div>
         <div class="toggle-selector">
-          <button class="toggle-btn" id="btn-cli-Easy" onclick="onClienteClick('Easy')">Easy</button>
-          <button class="toggle-btn" id="btn-cli-Paris" onclick="onClienteClick('Paris')">Paris</button>
+          <!-- Los botones se arman solos con los clientes que de verdad hay en la hoja.
+               Estaban fijos (Easy / Paris) y el dia que empezaron a llegar reingresos de
+               "OPL Vina" quedaron guardados pero SIN boton para seleccionarlos: el palet
+               existia y no habia como rebajarlo (22-10). -->
+          <div id="clientesBotones" style="display:flex;gap:8px;flex-wrap:wrap"></div>
         </div>
 
         <div class="field-group hidden" id="fechaGroup">
@@ -483,7 +486,33 @@
         updateLoadStatus('✗ Error al conectar con el sheet: ' + e.message);
         showToast('Error cargando datos del sheet', 'error');
       }
+      pintarClientes();
       updateTotalCount();
+    }
+
+    // Easy y Paris primero (son los de todos los dias) y el resto detras, alfabetico.
+    const ORDEN_CLIENTES = ['Easy', 'Paris'];
+
+    function pintarClientes() {
+      const cont = document.getElementById('clientesBotones');
+      if (!cont) return;
+      const clientes = [...new Set(Object.keys(reingresoData).map(k => k.split('::')[0]))]
+        .sort((a, b) => {
+          const ia = ORDEN_CLIENTES.indexOf(a), ib = ORDEN_CLIENTES.indexOf(b);
+          if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+          return a.localeCompare(b, 'es');
+        });
+      cont.innerHTML = '';
+      clientes.forEach(c => {
+        const b = document.createElement('button');
+        b.className = 'toggle-btn' + (c === selectedCliente ? ' selected' : '');
+        b.textContent = c;
+        b.onclick = () => onClienteClick(c);
+        cont.appendChild(b);
+      });
+      if (!clientes.length) {
+        cont.innerHTML = '<span class="muted">Sin hojas TIM pendientes.</span>';
+      }
     }
 
     async function recargarDatos() {
@@ -511,8 +540,7 @@
     // ─── STEP 1: CLIENTE + FECHA ────────────────────────────────────
     function onClienteClick(cliente) {
       selectedCliente = cliente;
-      document.getElementById('btn-cli-Easy').classList.toggle('selected', cliente === 'Easy');
-      document.getElementById('btn-cli-Paris').classList.toggle('selected', cliente === 'Paris');
+      pintarClientes();   // repinta marcando el elegido
       populateFechaSelect();
       document.getElementById('fechaGroup').classList.remove('hidden');
       document.getElementById('grupoInfo').classList.add('hidden');
