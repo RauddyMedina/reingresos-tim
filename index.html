@@ -490,29 +490,32 @@
       updateTotalCount();
     }
 
-    // Easy y Paris primero (son los de todos los dias) y el resto detras, alfabetico.
-    const ORDEN_CLIENTES = ['Easy', 'Paris'];
+    // Los destinos de siempre se muestran aunque hoy no tengan hojas: asi se ve que el
+    // destino EXISTE y que simplemente no hay nada pendiente, en vez de parecer que el
+    // tablero se lo comio. Los que no estan en la lista (un destino nuevo) aparecen
+    // igual cuando llega su primera linea.
+    const DESTINOS = ['Easy', 'Paris', 'OPL Viña', 'OPL Belloto'];
 
     function pintarClientes() {
       const cont = document.getElementById('clientesBotones');
       if (!cont) return;
-      const clientes = [...new Set(Object.keys(reingresoData).map(k => k.split('::')[0]))]
-        .sort((a, b) => {
-          const ia = ORDEN_CLIENTES.indexOf(a), ib = ORDEN_CLIENTES.indexOf(b);
-          if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-          return a.localeCompare(b, 'es');
-        });
+      const conDatos = new Set(Object.keys(reingresoData).map(k => k.split('::')[0]));
+      const clientes = [...new Set([...DESTINOS, ...conDatos])].sort((a, b) => {
+        const ia = DESTINOS.indexOf(a), ib = DESTINOS.indexOf(b);
+        if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+        return a.localeCompare(b, 'es');
+      });
       cont.innerHTML = '';
       clientes.forEach(c => {
+        const hojas = Object.keys(reingresoData).filter(k => k.startsWith(c + '::')).length;
         const b = document.createElement('button');
         b.className = 'toggle-btn' + (c === selectedCliente ? ' selected' : '');
-        b.textContent = c;
-        b.onclick = () => onClienteClick(c);
+        b.textContent = hojas ? c : c + ' (0)';
+        b.disabled = !hojas;
+        b.title = hojas ? `${hojas} hoja(s) TIM pendiente(s)` : 'Sin hojas TIM pendientes';
+        if (hojas) b.onclick = () => onClienteClick(c);
         cont.appendChild(b);
       });
-      if (!clientes.length) {
-        cont.innerHTML = '<span class="muted">Sin hojas TIM pendientes.</span>';
-      }
     }
 
     async function recargarDatos() {
