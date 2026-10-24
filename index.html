@@ -494,7 +494,11 @@
     // destino EXISTE y que simplemente no hay nada pendiente, en vez de parecer que el
     // tablero se lo comio. Los que no estan en la lista (un destino nuevo) aparecen
     // igual cuando llega su primera linea.
-    const DESTINOS = ['Easy', 'Paris', 'OPL Viña', 'OPL Belloto'];
+    // 'Easy' no esta en la lista a proposito: lo que vuelve al centro de
+    // distribucion ahora se escribe 'CD'. Las filas viejas que dicen 'Easy' siguen
+    // apareciendo solas mientras tengan hojas pendientes (ver conDatos), porque ese
+    // texto es parte de la clave con la que el tablero sabe que ya se fotografio.
+    const DESTINOS = ['CD', 'Paris', 'OPL Viña', 'OPL Belloto'];
 
     function pintarClientes() {
       const cont = document.getElementById('clientesBotones');
