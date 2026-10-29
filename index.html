@@ -511,13 +511,18 @@
       });
       cont.innerHTML = '';
       clientes.forEach(c => {
-        const hojas = Object.keys(reingresoData).filter(k => k.startsWith(c + '::')).length;
+        const grupos = Object.keys(reingresoData).filter(k => k.startsWith(c + '::'));
+        // El numero son las LINEAS que faltan rebajar, no cuantas hojas TIM hay: es el
+        // dato que el bodeguero necesita de un vistazo ("al CD le quedan 7").
+        const lineas = grupos.reduce((n, k) => n + reingresoData[k].length, 0);
         const b = document.createElement('button');
         b.className = 'toggle-btn' + (c === selectedCliente ? ' selected' : '');
-        b.textContent = hojas ? c : c + ' (0)';
-        b.disabled = !hojas;
-        b.title = hojas ? `${hojas} hoja(s) TIM pendiente(s)` : 'Sin hojas TIM pendientes';
-        if (hojas) b.onclick = () => onClienteClick(c);
+        b.textContent = `${c} (${lineas})`;
+        b.disabled = !lineas;
+        b.title = lineas
+          ? `${lineas} linea(s) pendiente(s) en ${grupos.length} hoja(s) TIM`
+          : 'Sin lineas pendientes';
+        if (lineas) b.onclick = () => onClienteClick(c);
         cont.appendChild(b);
       });
     }
@@ -1410,8 +1415,6 @@
       document.getElementById('step1').classList.add('active');
       document.getElementById('step1').classList.remove('completed');
       document.getElementById('step1').querySelector('.step-num').textContent = '1';
-      document.getElementById('btn-cli-Easy').classList.remove('selected');
-      document.getElementById('btn-cli-Paris').classList.remove('selected');
       document.getElementById('fechaGroup').classList.add('hidden');
       document.getElementById('grupoInfo').classList.add('hidden');
       document.getElementById('btnConfirmarGrupo').disabled = true;
@@ -1430,6 +1433,7 @@
       mostrarBtnReintentar(false);
 
       selectedCliente = ''; selectedFecha = ''; selectedGrupo = '';
+      pintarClientes();  // repinta los botones sin seleccion y con el conteo al dia
       lineasListas = {}; paletFotosData = []; lineaActual = null;
       lineasManuales = {}; // limpiar por completo: si no, reprocesar el mismo cliente+fecha
                             // más tarde resucitaría entregas manuales ya enviadas como pendientes
