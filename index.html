@@ -1206,32 +1206,47 @@
       const total = tandas.length;
       mostrarBtnReintentar(false);
 
-      const watchdog = setTimeout(() => {
-        actualizarReceiptStatus('⚠️ Sin respuesta del sistema — verifica con admin');
-        mostrarBtnReintentar(true);
-      }, 90000 + 60000 * total);
+      // El palet viaja como una "línea" más (id '_palet'), pero el bodeguero no lo
+      // cuenta así: en pantalla se nombra aparte.
+      const sinPalet = ts => ts.reduce((s, t) => s + t.filter(o => o.id !== '_palet').length, 0);
+      const totalLineas = sinPalet(tandas);
 
+      // Sin watchdog a propósito: cada tramo del bucle ya tiene tope (TOPE_POST_MS en el
+      // POST y en el fallback, intentos × 15 s en verificarEnvio), así que no se puede
+      // colgar. El que había disparaba a los 90 s + 60 s/tanda y hoy pintaría "sin
+      // respuesta" ENCIMA de un envío que sigue subiendo bien.
       try {
         while (envioEnCurso.idx < total) {
           const i = envioEnCurso.idx;
           const tanda = tandas[i];
           const ids = tanda.map(o => o.id);
-          actualizarReceiptStatus(total > 1 ? `⏳ Enviando tanda ${i + 1}/${total} (${ids.length} línea(s))...` : '⏳ Enviando al sistema...');
+          actualizarReceiptStatus(tanda.every(o => o.id === '_palet')
+            ? '⏳ Subiendo las fotos del palet…'
+            : `⏳ Subiendo fotos: línea ${sinPalet(tandas.slice(0, i + 1))} de ${totalLineas}…`);
 
           const sub = { ...record, ordenes: tanda, totalOrdenes: tanda.length, secret: GAS_SECRET };
-          enviarViaFormPost(sub);
+          const envio = await enviarViaFormPost(sub);
           await sleep(1200);
 
           let ok = await verificarEnvio(record.cliente, record.fecha, 10, 3000, ids);
           if (!ok) {
-            console.warn(`Tanda ${i + 1}/${total} sin verificar, reenviando...`);
-            await enviarViaFetchFallback(sub);
+            // Reenviar el mismo ~1 MB por un enlace que todavía está subiendo lo termina
+            // de tapar (incidente 07-09-2026). Si el POST ya contestó, lo único que
+            // falta es que el Sheet lo refleje: esperar, no reenviar.
+            console.warn(`Tanda ${i + 1}/${total} sin verificar (POST ${envio.llego ? 'contestó' : 'NO contestó'})`);
+            if (!envio.llego) await enviarViaFetchFallback(sub);
             ok = await verificarEnvio(record.cliente, record.fecha, 6, 3000, ids);
           }
           if (!ok) {
-            const pendientes = tandas.slice(i).reduce((s, t) => s + t.length, 0);
-            showToast('⚠ Envío incompleto — usa Reintentar', 'error');
-            actualizarReceiptStatus(`⚠️ Quedaron ${pendientes} línea(s) sin confirmar — presiona Reintentar envío`);
+            // Qué quedó registrado y qué falta, en vez de "quedaron N líneas sin
+            // confirmar": con 9 de 10 adentro el mensaje viejo sonaba a todo perdido.
+            const hechas = sinPalet(tandas.slice(0, i));
+            const faltaPalet = tandas.slice(i).some(t => t.some(o => o.id === '_palet'));
+            const detalle = [];
+            if (hechas < totalLineas) detalle.push(`${totalLineas - hechas} línea(s)`);
+            if (faltaPalet) detalle.push('las fotos del palet');
+            showToast(`⚠ Falta ${detalle.join(' y ')} — usa Reintentar`, 'error');
+            actualizarReceiptStatus(`⚠️ ${hechas} de ${totalLineas} línea(s) YA quedaron registradas. Falta subir ${detalle.join(' y ')} — presiona Reintentar envío.`);
             mostrarBtnReintentar(true);
             return;
           }
@@ -1248,8 +1263,6 @@
         showToast('⚠ Error de conexión — reintenta', 'error');
         actualizarReceiptStatus('⚠️ Error de conexión — presiona Reintentar envío');
         mostrarBtnReintentar(true);
-      } finally {
-        clearTimeout(watchdog);
       }
     }
 
@@ -1273,20 +1286,28 @@
         tit.style.color = visible ? 'var(--danger)' : '';
       }
       if (sub) sub.textContent = visible
-        ? 'NO cierres esta página: quedaron líneas SIN registrar. Aprieta "Reintentar envío". Si igual falla, recarga la página — tu avance con las fotos queda guardado.'
+        ? 'NO cierres esta página. Abajo dice cuánto quedó registrado y cuánto falta. Aprieta "Reintentar envío". Si igual falla, recarga la página — tu avance con las fotos queda guardado.'
         : 'Los datos y las fotos fueron registrados en el sistema.';
       if (sub) sub.style.color = visible ? 'var(--warning)' : '';
       if (nuevo) nuevo.classList.toggle('hidden', visible);
     }
 
-    // Envía datos mediante un formulario oculto + iframe (bypasea CORS completamente)
+    // Envía datos mediante un formulario oculto + iframe (bypasea CORS completamente).
+    // Resuelve cuando el POST TERMINÓ de subir (load del iframe), NO al apretar submit.
+    // Antes resolvía al instante, así que los ~49 s de verificarEnvio corrían MIENTRAS
+    // el ~1 MB de la tanda todavía iba subiendo desde el celular de bodega, y una tanda
+    // lenta se declaraba perdida aunque llegara entera (CD 19-11-2026: las 10 tandas
+    // llegaron y el tablero igual dijo "ENVÍO INCOMPLETO").
+    // ponytail: tope de TOPE_POST_MS por tanda. El propio GAS se corta a los 6 min, así
+    // que pasado eso ese POST no va a contestar nunca.
+    const TOPE_POST_MS = 300000;
+
     function enviarViaFormPost(data) {
       return new Promise((resolve) => {
-        const uid = 'gas_' + Date.now();
+        const uid = 'gas_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
         const iframe = document.createElement('iframe');
         iframe.name = uid;
         iframe.style.display = 'none';
-        document.body.appendChild(iframe);
 
         const form = document.createElement('form');
         form.method = 'POST';
@@ -1300,24 +1321,45 @@
         input.value = JSON.stringify(data);
         form.appendChild(input);
 
-        document.body.appendChild(form);
-        form.submit();
-        resolve();
-
         const limpiar = () => {
           try { document.body.removeChild(form); } catch (_) { }
           try { document.body.removeChild(iframe); } catch (_) { }
         };
-        iframe.addEventListener('load', () => setTimeout(limpiar, 1000));
-        setTimeout(limpiar, 60000);
+        let resuelto = false;
+        const terminar = (llego) => {
+          if (resuelto) return;
+          resuelto = true;
+          clearTimeout(tope);
+          resolve({ llego });
+          setTimeout(limpiar, 1000);
+        };
+        const tope = setTimeout(() => terminar(false), TOPE_POST_MS);
+
+        // Un iframe recién insertado emite un 'load' por su about:blank inicial, y ese
+        // NO cuenta: resolvería al instante y el arreglo no serviría de nada. Mientras
+        // sigue en about:blank es same-origin y su location se puede leer; después del
+        // POST queda en googleusercontent.com y leerla tira SecurityError — eso último
+        // es la respuesta del GAS.
+        iframe.addEventListener('load', () => {
+          try {
+            if (iframe.contentWindow.location.href === 'about:blank') return;
+          } catch (_) { }
+          terminar(true);
+        });
+
+        document.body.appendChild(iframe);
+        document.body.appendChild(form);
+        form.submit();
       });
     }
 
     async function enviarViaFetchFallback(data) {
       try {
-        await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), redirect: 'follow' });
+        // Con tope: era el único tramo del envío sin límite de tiempo y podía dejar el
+        // await colgado para siempre.
+        await fetchWithTimeout(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), redirect: 'follow' }, TOPE_POST_MS);
       } catch (e) {
-        console.log('Fetch fallback completado (CORS esperado):', e.message);
+        console.log('Fetch fallback terminado (CORS esperado o tope):', e.message);
       }
     }
 
